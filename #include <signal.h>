@@ -1,0 +1,180 @@
+/* Rosalie Orth 
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <string.h>
+#include <time.h>
+
+//  Teacher: reads from P1_READ, writes on P1_WRITE
+//  Student:  reads from P2_READ, writes on P2_WRITE
+#define P1_READ     0
+#define P2_WRITE    1
+#define P2_READ     2
+#define P1_WRITE    3
+
+// the total number of pipe *pairs* 
+#define NUM_PIPES   2
+
+int main(int argc, char *argv[])
+{
+
+    srand(time(NULL)); 
+    int random; 
+    int flag; 
+    random = rand() % 5; //random number between 0 and 4 inclusive 
+    flag = rand() % 2; //random number between 0 and 1 inclusive 
+
+    char *situation[5] = {
+        "Student: The light is green",
+        "Student: There is a pedestrian ahead", 
+        "Student: The car ahead of me is stopped", 
+        "Student: The car in front of me is moving", 
+        "Student: The road is turning right"
+    };
+    char *recommendation[5] = {
+        "Teacher: Hit the accelerator",
+        "Teacher: Hit the breaks", 
+        "Teacher: Hit the breaks",
+        "Teacher: Hit the accelerator", 
+        "Teacher: Steer Right"
+    };
+    char *action[4] = {
+        "Student: Done",
+        "Student: Oops, I hit the accelerator",
+        "Student: Oops, I hit the breaks",
+        "Student: Oops, I steered left"
+    };
+
+
+    int fd[2*NUM_PIPES];
+    int val = 0, len, i;
+    pid_t pid;
+
+    //some pipe code stuff
+    for (i=0; i<NUM_PIPES; ++i)
+    {
+        if (pipe(fd+(i*2)) < 0)
+        {
+            perror("Failed to allocate pipes");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    
+    if ((pid = fork()) < 0)
+    {
+        perror("Failed to fork process");
+        return EXIT_FAILURE;
+    }
+
+    //child
+    if (pid == 0)
+    {
+        // start child 
+        close(fd[P1_READ]);
+        close(fd[P1_WRITE]);
+
+
+        // wait for parent 
+        len = read(fd[P2_READ], &val, sizeof(val));
+        if (len < 0)
+        {
+            perror("Child: Failed to read data from pipe");
+            exit(EXIT_FAILURE);
+        }
+        else if (len == 0)
+        {
+            // failure
+            fprintf(stderr, "Child: Read EOF from pipe");
+        }
+        else
+        {
+            // print recommendation from parent 
+            printf("%s\n", recommendation[random]);
+
+            
+
+            //child is sending back its action 
+            if (flag == 1) {
+                if (random == 0 || random == 3) {
+                    printf("%s\n", action[2]);
+                }
+                else if (random == 1 || random == 2) {
+                    printf("%s\n", action[1]);
+                }
+                else if (random == 4) {
+                    printf("%s\n", action[3]);
+                }
+            }
+            else {
+                printf("%s\n", action[0]);
+            }
+
+            if (write(fd[P2_WRITE], &val, sizeof(val)) < 0)
+            {
+                perror("Child: Failed to write response value");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        // finished. close remaining descriptors.
+        close(fd[P2_READ]);
+        close(fd[P2_WRITE]);
+
+        return EXIT_SUCCESS;
+    }
+
+    // Parent closing descrips 
+    close(fd[P2_READ]);
+    close(fd[P2_WRITE]);
+
+    
+    pid = getpid();
+
+    
+    val = 42;
+
+    //first statement to print. Send situation 
+    printf("%s\n", situation[random]);
+    if (write(fd[P1_WRITE], &val, sizeof(val)) != sizeof(val))
+    {
+        perror("Parent: Failed to send value to child ");
+        exit(EXIT_FAILURE);
+    }
+
+    // now wait for a response
+    len = read(fd[P1_READ], &val, sizeof(val));
+    if (len < 0)
+    {
+        perror("Parent: failed to read value from pipe");
+        exit(EXIT_FAILURE);
+    }
+    else if (len == 0)
+    {
+        // failure 
+        fprintf(stderr, "Parent(%d): Read EOF from pipe", pid);
+    }
+    else
+    {
+        //if flag is 0 then student does correct thing
+        if (flag == 0) {  
+            // print reaction 
+            printf("Teacher: What a good teacher I am!\n");
+        }
+        else {
+            printf("Teacher: What a lousy teacher I am!\n");
+        }
+    }
+
+    // close descrips
+    close(fd[P1_READ]);
+    close(fd[P1_WRITE]);
+
+    // wait for child to die 
+    wait(NULL);
+
+    return EXIT_SUCCESS;
+}
